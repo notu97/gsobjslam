@@ -15,7 +15,7 @@ class GS_OBJ_SLAM(object):
         self.dataset = get_dataset(self.configs['dataset_name'])(self.configs)
         self.yolo = YOLO("yolo_models/yolov8n-seg.pt")  # load an official model
         self.associator = Associator(self.configs)
-        self.mapper = Mapper(self.configs)
+        self.mapper = Mapper(self.configs, self.dataset)
 
         self.gaussian_models = []   # each object as a submap
         self.associations = {}  # key: tracking id from YOLO. value: idx of submap.
@@ -43,16 +43,16 @@ class GS_OBJ_SLAM(object):
                 # if this tracking id is already seen
                 if tracking_id in self.associations.keys():
                     # optimize associated submap
-                    self.mapper.optimize_map(estimated_c2w, yolo_result,
-                                             self.gaussian_models[self.associations[tracking_id]], i)
+                    self.mapper.update(frame_id, estimated_c2w, yolo_result,
+                                       self.gaussian_models[self.associations[tracking_id]], i)
                 else:
                     ascn = self.associator.associate(yolo_result, i, self.gaussian_models)  # try to associate
                     if ascn == -1:  # cannot find association
-                        # initialize a new submap
-                        self.gaussian_models.append(self.mapper.new_map(estimated_c2w, yolo_result, i))
+                        # start a new submap
+                        self.gaussian_models.append(self.mapper.new(frame_id, estimated_c2w, yolo_result, i))
                         self.associations[tracking_id] = len(self.gaussian_models) - 1  # record association
                     else:
                         self.associations[tracking_id] = ascn   # record association
                         # optimize associated submap
-                        self.mapper.optimize_map(estimated_c2w, yolo_result,
-                                                 self.gaussian_models[self.associations[tracking_id]], i)
+                        self.mapper.update(frame_id, estimated_c2w, yolo_result,
+                                           self.gaussian_models[self.associations[tracking_id]], i)
