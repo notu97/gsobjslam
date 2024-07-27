@@ -17,13 +17,12 @@ class GS_OBJ_SLAM(object):
         self.associator = Associator(self.configs)
         self.mapper = Mapper(self.configs)
 
-        self.gaussian_models = []
+        self.gaussian_models = []   # each object as a submap
+        self.associations = {}  # key: tracking id from YOLO. value: idx of submap.
 
     def track(self, rgb) -> ultralytics.engine.results.Results:
 
-        tensor_image = torch.tensor(rgb, dtype=torch.float32)
-        tensor_image = tensor_image.permute(2, 0, 1).unsqueeze(0)   # shape (1, 3, H, W)
-        results = self.yolo.track(tensor_image, persist=True)
+        results = self.yolo.track(rgb, persist=True)
 
         return results[0]
 
@@ -36,11 +35,24 @@ class GS_OBJ_SLAM(object):
                 raise NotImplementedError
 
             yolo_result = self.track(self.dataset[frame_id][1])
-            association = self.associator.associate(yolo_result, self.gaussian_models)
+            if yolo_result.boxes.id is None:
+                continue
             # iterate over objects
-            for i in range(len(association)):
-                associated_map_idx = association[i]
-                if 0 <= associated_map_idx < len(self.gaussian_models):
-                    self.mapper.optimize_map(estimated_c2w, yolo_result, self.gaussian_models[associated_map_idx], i)
+            for i in range(len(yolo_result)):
+                tracking_id = int(yolo_result.boxes.id[i].numpy())
+                # if this tracking id is already seen
+                if tracking_id in self.associations.keys():
+                    # optimize associated submap
+                    self.mapper.optimize_map(estimated_c2w, yolo_result,
+                                             self.gaussian_models[self.associations[tracking_id]], i)
                 else:
-                    self.gaussian_models.append(self.mapper.new_map(estimated_c2w, yolo_result, i))
+                    ascn = self.associator.associate(yolo_result, i, self.gaussian_models)  # try to associate
+                    if ascn == -1:  # cannot find association
+                        # initialize a new submap
+                        self.gaussian_models.append(self.mapper.new_map(estimated_c2w, yolo_result, i))
+                        self.associations[tracking_id] = len(self.gaussian_models) - 1  # record association
+                    else:
+                        self.associations[tracking_id] = ascn   # record association
+                        # optimize associated submap
+                        self.mapper.optimize_map(estimated_c2w, yolo_result,
+                                                 self.gaussian_models[self.associations[tracking_id]], i)

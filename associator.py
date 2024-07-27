@@ -7,6 +7,7 @@ class Associator:
 
         self.configs = configs
 
-    def associate(self, yolo_result: ultralytics.engine.results.Results, submaps: list) -> list:
+    def associate(self, yolo_result: ultralytics.engine.results.Results, object_idx: int,
+                  submaps: list) -> int:
 
-        return yolo_result.boxes.id.int().cpu().tolist()
+        return -1

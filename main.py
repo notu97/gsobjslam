@@ -1,8 +1,10 @@
 from utils.utils import *
 from datasets import *
+from GS_OBJ_SLAM import *
 
 
 configs_path = 'configs/TUM_RGBD/rgbd_dataset_freiburg1_desk.yaml'
-config = load_config(configs_path)
+slam = GS_OBJ_SLAM(configs_path)
+slam.run()
 
-mydata = TUM_RGBD(config)
+print(slam.associations)
