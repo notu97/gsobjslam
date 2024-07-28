@@ -8,6 +8,7 @@ input_path: /home/nathan/datasets/tum/rgbd_dataset_freiburg1_desk/
 output_path: output/TUM_RGBD/rgbd_dataset_freiburg1_desk/
 scene_name: rgbd_dataset_freiburg1_desk
 # mapping
+uniform_seed_interval: 3
 map_iterations: 100
 new_submap_iterations: 100
 # tracking
@@ -23,5 +24,5 @@ fx: 517.3
 fy: 516.5
 cx: 318.6
 cy: 255.3
-crop_edge: 32
-distortion: [ 0.2624, -0.9531, -0.0054, 0.0026, 1.1633 ]
+crop_edge: 0
+# distortion: [ 0.2624, -0.9531, -0.0054, 0.0026, 1.1633 ]

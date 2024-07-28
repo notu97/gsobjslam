@@ -1,3 +1,4 @@
+import numpy as np
 import ultralytics.engine.results
 from argparse import ArgumentParser
 import torchvision
@@ -6,6 +7,7 @@ from gaussian_model import GaussianModel
 from arguments import OptimizationParams
 from datasets import *
 from utils.utils import *
+from utils.mapper_utils import *
 
 
 class Mapper:
@@ -13,6 +15,7 @@ class Mapper:
     def __init__(self, config: dict, dataset: BaseDataset) -> None:
 
         self.config = config
+        self.uniform_seed_interval = config['uniform_seed_interval']
         self.dataset = dataset
         self.opt = OptimizationParams(ArgumentParser(description="Training script parameters"))
 
@@ -37,4 +40,32 @@ class Mapper:
             "render_settings": get_render_settings(
                 self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
 
+        pts = self.seed_new_points(frame_id, c2w, self.dataset.intrinsics, yolo_result, object_idx, is_new)
+
         return submap
+
+    def seed_new_points(self, frame_id: int, c2w: np.ndarray, intrinsics: np.ndarray,
+                        yolo_result: ultralytics.engine.results.Results, object_idx: int, is_new: bool) -> np.ndarray:
+
+        obj_mask = yolo_result.masks.data[object_idx, :, :].cpu().detach().numpy()
+        _, gt_color, gt_depth, _ = self.dataset[frame_id]
+        gt_color = (gt_color.transpose((2, 0, 1)) * obj_mask).transpose((1, 2, 0))
+        gt_depth = gt_depth * obj_mask  # non-object area have zero depth
+
+        pts = create_point_cloud(gt_color, 1.005 * gt_depth, intrinsics, c2w)
+        flat_gt_depth = gt_depth.flatten()
+        non_zero_depth_mask = flat_gt_depth > 0.  # need filter if zero depth pixels in gt_depth
+        pts = pts[non_zero_depth_mask]
+
+        if is_new:
+            if self.uniform_seed_interval < 0:
+                uniform_ids = np.arange(pts.shape[0])
+            else:
+                num = np.int32(pts.shape[0] / self.uniform_seed_interval)
+                uniform_ids = np.random.choice(pts.shape[0], num, replace=False)
+            sample_ids = uniform_ids
+        else:
+            # @TODO: implement non-new map case
+            sample_ids = np.arange(0)
+
+        return pts[sample_ids, :].astype(np.float32)

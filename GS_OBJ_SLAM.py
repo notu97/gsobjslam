@@ -46,6 +46,7 @@ class GS_OBJ_SLAM(object):
                     self.mapper.update(frame_id, estimated_c2w, yolo_result,
                                        self.gaussian_models[self.associations[tracking_id]], i)
                 else:
+                    print('New tracking id: %s' % tracking_id)
                     ascn = self.associator.associate(yolo_result, i, self.gaussian_models)  # try to associate
                     if ascn == -1:  # cannot find association
                         # start a new submap
