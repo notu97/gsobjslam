@@ -1,10 +1,12 @@
 import ultralytics.engine.results
 from ultralytics import YOLO
+import torchvision
 
 from utils.utils import *
 from datasets import *
 from associator import Associator
 from mapper import Mapper
+from logger import Logger
 
 
 class GS_OBJ_SLAM(object):
@@ -16,11 +18,12 @@ class GS_OBJ_SLAM(object):
         self.yolo = YOLO("yolo_models/yolov8n-seg.pt")  # load an official model
         self.associator = Associator(self.configs)
         self.mapper = Mapper(self.configs, self.dataset)
+        self.logger = Logger(self.configs['output_path'])
 
         self.gaussian_models = []   # each object as a submap
         self.associations = {}  # key: tracking id from YOLO. value: idx of submap.
 
-    def track(self, rgb) -> ultralytics.engine.results.Results:
+    def track_objects(self, rgb) -> ultralytics.engine.results.Results:
 
         results = self.yolo.track(rgb, persist=True)
 
@@ -29,12 +32,14 @@ class GS_OBJ_SLAM(object):
     def run(self) -> None:
 
         for frame_id in range(len(self.dataset)):
+
+            _, gt_color, gt_depth, gt_pose = self.dataset[frame_id]
             if self.configs['gt_camera']:
-                estimated_c2w = self.dataset[frame_id][-1]
+                estimated_c2w = gt_pose
             else:
                 raise NotImplementedError
 
-            yolo_result = self.track(self.dataset[frame_id][1])
+            yolo_result = self.track_objects(gt_color)
             if yolo_result.boxes.id is None:
                 continue
             # iterate over objects
@@ -57,3 +62,23 @@ class GS_OBJ_SLAM(object):
                         # optimize associated submap
                         self.mapper.update(frame_id, estimated_c2w, yolo_result,
                                            self.gaussian_models[self.associations[tracking_id]], i)
+
+            # Visualise the mapping for the current frame
+            w2c = np.linalg.inv(estimated_c2w)
+            color_transform = torchvision.transforms.ToTensor()
+            keyframe = {
+                "color": color_transform(gt_color).cuda(),
+                "depth": np2torch(gt_depth, device="cuda"),
+                "render_settings": get_render_settings(
+                    self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
+
+            with torch.no_grad():
+                render_pkg_vis = render_gs(self.gaussian_models, keyframe['render_settings'])
+                image_vis, depth_vis = render_pkg_vis["color"], render_pkg_vis["depth"]
+
+                self.logger.vis_mapping_iteration(
+                    frame_id, 0,
+                    image_vis.clone().detach().permute(1, 2, 0),
+                    depth_vis.clone().detach().permute(1, 2, 0),
+                    keyframe["color"].permute(1, 2, 0),
+                    keyframe["depth"].unsqueeze(-1))

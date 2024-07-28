@@ -1,6 +1,7 @@
 import yaml
 import numpy as np
 import torch
+import open3d as o3d
 from gaussian_rasterizer import GaussianRasterizationSettings, GaussianRasterizer
 
 
@@ -63,3 +64,47 @@ def get_render_settings(w, h, intrinsics, w2c: np.ndarray, near=0.01, far=100, s
         campos=cam_center,
         prefiltered=False,
         debug=False)
+
+
+def np2ptcloud(pts: np.ndarray, rgb=None) -> o3d.geometry.PointCloud:
+    """converts numpy array to point cloud
+    Args:
+        pts (ndarray): point cloud
+    Returns:
+        (PointCloud): resulting point cloud
+    """
+    cloud = o3d.geometry.PointCloud()
+    cloud.points = o3d.utility.Vector3dVector(pts)
+    if rgb is not None:
+        cloud.colors = o3d.utility.Vector3dVector(rgb)
+    return cloud
+
+
+def render_gs(gaussian_models: list, render_settings: object) -> dict:
+
+    renderer = GaussianRasterizer(raster_settings=render_settings)
+
+    means3D = torch.nn.Parameter(data=torch.vstack([model.get_xyz() for model in gaussian_models]))
+    means2D = torch.zeros_like(
+        means3D, dtype=means3D.dtype, requires_grad=True, device="cuda")
+    means2D.retain_grad()
+    opacities = torch.vstack([model.get_opacity() for model in gaussian_models])
+
+    shs, colors_precomp = None, None
+    shs = torch.concatenate([model.get_features() for model in gaussian_models], dim=0)
+    scales = torch.vstack([model.get_scaling() for model in gaussian_models])
+    rotations = torch.vstack([model.get_rotation() for model in gaussian_models])
+
+    render_args = {
+        "means3D": means3D,
+        "means2D": means2D,
+        "opacities": opacities,
+        "colors_precomp": colors_precomp,
+        "shs": shs,
+        "scales": scales,
+        "rotations": rotations,
+        "cov3D_precomp": None
+    }
+    color, depth, alpha, radii = renderer(**render_args)
+
+    return {"color": color, "depth": depth, "radii": radii, "means2D": means2D, "alpha": alpha}

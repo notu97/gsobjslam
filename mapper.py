@@ -32,15 +32,17 @@ class Mapper:
                submap: GaussianModel, object_idx: int, is_new=False) -> GaussianModel:
 
         _, gt_color, gt_depth, _ = self.dataset[frame_id]
-        w2c = np.linalg.inv(c2w)
-        color_transform = torchvision.transforms.ToTensor()
-        keyframe = {
-            "color": color_transform(gt_color).cuda(),
-            "depth": np2torch(gt_depth, device="cuda"),
-            "render_settings": get_render_settings(
-                self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
+        # w2c = np.linalg.inv(c2w)
+        # color_transform = torchvision.transforms.ToTensor()
+        # keyframe = {
+        #     "color": color_transform(gt_color).cuda(),
+        #     "depth": np2torch(gt_depth, device="cuda"),
+        #     "render_settings": get_render_settings(
+        #         self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
 
         pts = self.seed_new_points(frame_id, c2w, self.dataset.intrinsics, yolo_result, object_idx, is_new)
+        new_pts_num = self.grow_submap(c2w, submap, pts)
+        # @TODO: optimize submap
 
         return submap
 
@@ -62,10 +64,22 @@ class Mapper:
                 uniform_ids = np.arange(pts.shape[0])
             else:
                 num = np.int32(pts.shape[0] / self.uniform_seed_interval)
-                uniform_ids = np.random.choice(pts.shape[0], num, replace=False)
+                uniform_ids = np.random.choice(pts.shape[0], num, replace=False)    # sample points uniformly
             sample_ids = uniform_ids
         else:
             # @TODO: implement non-new map case
             sample_ids = np.arange(0)
 
         return pts[sample_ids, :].astype(np.float32)
+
+    def grow_submap(self, c2w: np.ndarray, submap: GaussianModel, pts: np.ndarray) -> int:
+
+        # @TODO: filter the points
+        new_pts_ids = np.arange(pts.shape[0])
+        cloud_to_add = np2ptcloud(pts[new_pts_ids, :3], pts[new_pts_ids, 3:] / 255.0)
+        submap.add_points(cloud_to_add)
+        submap._features_dc.requires_grad = False
+        submap._features_rest.requires_grad = False
+        print("Gaussian model size", submap.get_size())
+
+        return new_pts_ids.shape[0]
