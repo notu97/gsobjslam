@@ -1,7 +1,7 @@
 project_name: "Gaussian_SLAM_tumrgbd"
 dataset_name: "tum_rgbd"
 checkpoint_path: null
-frame_limit: 50 # use first n frames. for debugging, set to -1 to disable
+frame_limit: 100 # use first n frames. for debugging, set to -1 to disable
 seed: 0
 # data
 input_path: /home/nathan/datasets/tum/rgbd_dataset_freiburg1_desk/
@@ -11,6 +11,7 @@ scene_name: rgbd_dataset_freiburg1_desk
 uniform_seed_interval: 3
 map_iterations: 100
 new_submap_iterations: 100
+iou_thresh: 0.35
 # tracking
 gt_camera: True
 track_iterations: 200

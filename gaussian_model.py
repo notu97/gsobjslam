@@ -131,7 +131,8 @@ class GaussianModel:
         features = (torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda())
         features[:, :3, 0] = fused_color
         features[:, 3:, 1:] = 0.0
-        print("Number of added points: ", fused_point_cloud.shape[0])
+        # @TODO: Re-enable terminal output
+        # print("Number of added points: ", fused_point_cloud.shape[0])
 
         if global_scale_init:
             global_points = torch.cat((self.get_xyz(),torch.from_numpy(np.asarray(pcd.points)).float().cuda()))

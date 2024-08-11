@@ -80,6 +80,7 @@ class Mapper:
         submap.add_points(cloud_to_add)
         submap._features_dc.requires_grad = False
         submap._features_rest.requires_grad = False
-        print("Gaussian model size", submap.get_size())
+        # @TODO: Re-enable terminal output
+        # print("Gaussian model size", submap.get_size())
 
         return new_pts_ids.shape[0]

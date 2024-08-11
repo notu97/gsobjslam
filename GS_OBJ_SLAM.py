@@ -23,52 +23,73 @@ class GS_OBJ_SLAM(object):
         self.gaussian_models = []   # each object as a submap
         self.associations = {}  # key: tracking id from YOLO. value: idx of submap.
 
+        self.cur_gt_color = None
+        self.cur_gt_depth = None
+        self.cur_est_c2w = None
+
     def track_objects(self, rgb) -> ultralytics.engine.results.Results:
 
         results = self.yolo.track(rgb, persist=True)
 
         return results[0]
 
+    def update_associations(self, yolo_result: ultralytics.engine.results.Results) -> dict:
+
+        ids = list(np.int32(yolo_result.boxes.id.numpy()))
+        new_detections = yolo_result[[i for i, id in enumerate(ids) if id not in self.associations.keys()]]
+        old_ids = [id for id in ids if id in self.associations.keys()]
+        associated_models_idxs = [self.associations[id] for id in old_ids]
+        dangling_models = [(i, model) for i, model in enumerate(self.gaussian_models)
+                           if i not in associated_models_idxs]
+
+        if (len(dangling_models) == 0) or (len(new_detections) == 0):
+            return {}
+
+        new_associations = self.associator.associate(new_detections, dangling_models, self.cur_gt_color,
+                                                     self.cur_gt_depth, self.cur_est_c2w, self.dataset.intrinsics)
+        self.associations.update(new_associations)
+        print("New associations found:")
+        print(new_associations)
+
+        return new_associations
+
     def run(self) -> None:
 
         for frame_id in range(len(self.dataset)):
 
-            _, gt_color, gt_depth, gt_pose = self.dataset[frame_id]
+            _, self.cur_gt_color, self.cur_gt_depth, gt_pose = self.dataset[frame_id]
             if self.configs['gt_camera']:
-                estimated_c2w = gt_pose
+                self.cur_est_c2w = gt_pose
             else:
                 raise NotImplementedError
 
-            yolo_result = self.track_objects(gt_color)
+            # track objects
+            yolo_result = self.track_objects(self.cur_gt_color)
             if yolo_result.boxes.id is None:
                 continue
+            # update associations
+            self.update_associations(yolo_result)
+
             # iterate over objects
             for i in range(len(yolo_result)):
                 tracking_id = int(yolo_result.boxes.id[i].numpy())
-                # if this tracking id is already seen
+                # if this tracking id is already associated
                 if tracking_id in self.associations.keys():
                     # optimize associated submap
-                    self.mapper.update(frame_id, estimated_c2w, yolo_result,
+                    self.mapper.update(frame_id, self.cur_est_c2w, yolo_result,
                                        self.gaussian_models[self.associations[tracking_id]], i)
                 else:
                     print('New tracking id: %s' % tracking_id)
-                    ascn = self.associator.associate(yolo_result, i, self.gaussian_models)  # try to associate
-                    if ascn == -1:  # cannot find association
-                        # start a new submap
-                        self.gaussian_models.append(self.mapper.new(frame_id, estimated_c2w, yolo_result, i))
-                        self.associations[tracking_id] = len(self.gaussian_models) - 1  # record association
-                    else:
-                        self.associations[tracking_id] = ascn   # record association
-                        # optimize associated submap
-                        self.mapper.update(frame_id, estimated_c2w, yolo_result,
-                                           self.gaussian_models[self.associations[tracking_id]], i)
+                    # start a new submap
+                    self.gaussian_models.append(self.mapper.new(frame_id, self.cur_est_c2w, yolo_result, i))
+                    self.associations[tracking_id] = len(self.gaussian_models) - 1  # record association
 
             # Visualise the mapping for the current frame
-            w2c = np.linalg.inv(estimated_c2w)
+            w2c = np.linalg.inv(self.cur_est_c2w)
             color_transform = torchvision.transforms.ToTensor()
             keyframe = {
-                "color": color_transform(gt_color).cuda(),
-                "depth": np2torch(gt_depth, device="cuda"),
+                "color": color_transform(self.cur_gt_color).cuda(),
+                "depth": np2torch(self.cur_gt_depth, device="cuda"),
                 "render_settings": get_render_settings(
                     self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
 
