@@ -144,12 +144,12 @@ class Mapper:
             gt_depth = np2torch(keyframe["depth"], device='cuda')
 
             mask = (gt_depth > 0) & (~torch.isnan(depth)).squeeze(0)
-            # color_loss = (1.0 - self.opt.lambda_dssim) * l1_loss(
-            #     image[:, mask], gt_image[:, mask]) + self.opt.lambda_dssim * (1.0 - ssim(image, gt_image))
             color_loss = (1.0 - self.opt.lambda_dssim) * l1_loss(
-                image, gt_image) + self.opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+                image[:, mask], gt_image[:, mask]) + self.opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
-            depth_loss = l1_loss(depth[:, mask], gt_depth[mask])
+            # depth_loss = l1_loss(depth[:, mask], gt_depth[mask])
+            depth_loss = l1_loss(depth, gt_depth)
+
             reg_loss = isotropic_loss(submap.get_scaling())
             total_loss = color_loss + depth_loss + reg_loss
             total_loss.backward()
