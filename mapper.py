@@ -2,12 +2,14 @@ import numpy as np
 import ultralytics.engine.results
 from argparse import ArgumentParser
 import torchvision
+import time
 
 from gaussian_model import GaussianModel
 from arguments import OptimizationParams
 from datasets import *
 from utils.utils import *
 from utils.mapper_utils import *
+from losses import *
 
 
 class Mapper:
@@ -17,6 +19,10 @@ class Mapper:
         self.config = config
         self.alpha_thre = config['alpha_thre']
         self.uniform_seed_interval = config['uniform_seed_interval']
+        self.iterations = config['iterations']
+        self.new_submap_iterations = config['new_submap_iterations']
+        self.pruning_thre = config['pruning_thre']
+
         self.dataset = dataset
         self.opt = OptimizationParams(ArgumentParser(description="Training script parameters"))
 
@@ -46,10 +52,16 @@ class Mapper:
                 self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
 
         seeding_mask = self.compute_seeding_mask(submap, keyframe, is_new)
-        pts = self.seed_new_points(keyframe, seeding_mask, self.dataset.intrinsics, is_new)
+        pts = self.seed_new_gaussians(keyframe, seeding_mask, self.dataset.intrinsics, is_new)
         new_pts_num = self.grow_submap(c2w, submap, pts)
         # print("New points num: %d" % new_pts_num)
-        # @TODO: optimize submap
+
+        max_iterations = self.iterations
+        if is_new:
+            max_iterations = self.new_submap_iterations
+        opt_dict = self.optimize_submap([(frame_id, keyframe)], submap, max_iterations)
+        optimization_time = opt_dict['optimization_time']
+        print("Optimization time: ", optimization_time)
 
         return submap
 
@@ -69,8 +81,8 @@ class Mapper:
 
         return seeding_mask
 
-    def seed_new_points(self, keyframe: dict, seeding_mask: np.ndarray,
-                        intrinsics: np.ndarray, is_new: bool) -> np.ndarray:
+    def seed_new_gaussians(self, keyframe: dict, seeding_mask: np.ndarray,
+                           intrinsics: np.ndarray, is_new: bool) -> np.ndarray:
 
         pts = create_point_cloud(keyframe["color"], 1.005 * keyframe["depth"], intrinsics, keyframe["c2w"])
         flat_gt_depth = keyframe["depth"].flatten()
@@ -91,7 +103,10 @@ class Mapper:
                 sample_ids = valid_ids
             else:
                 num = np.int32(pts.shape[0] / self.uniform_seed_interval)
-                sample_ids = np.random.choice(valid_ids, num, replace=False)
+                try:
+                    sample_ids = np.random.choice(valid_ids, num, replace=False)
+                except ValueError:
+                    sample_ids = valid_ids
         sample_ids = sample_ids[non_zero_depth_mask[sample_ids]]
 
         return pts[sample_ids, :].astype(np.float32)
@@ -108,3 +123,55 @@ class Mapper:
         # print("Gaussian model size", submap.get_size())
 
         return new_pts_ids.shape[0]
+
+    def optimize_submap(self, keyframes: list, submap: GaussianModel, iterations: int = 100) -> dict:
+
+        iteration = 0
+        losses_dict = {}
+
+        start_time = time.time()
+        while iteration < iterations + 1:
+            submap.optimizer.zero_grad(set_to_none=True)
+            # @TODO: optimize using multiple views
+            keyframe_id = 0
+
+            frame_id, keyframe = keyframes[keyframe_id]
+            render_pkg = render_gs([submap], keyframe["render_settings"])
+
+            image, depth = render_pkg["color"], render_pkg["depth"]
+            color_transform = torchvision.transforms.ToTensor()
+            gt_image = color_transform(keyframe["color"]).cuda() / 255.0
+            gt_depth = np2torch(keyframe["depth"], device='cuda')
+
+            mask = (gt_depth > 0) & (~torch.isnan(depth)).squeeze(0)
+            # color_loss = (1.0 - self.opt.lambda_dssim) * l1_loss(
+            #     image[:, mask], gt_image[:, mask]) + self.opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+            color_loss = (1.0 - self.opt.lambda_dssim) * l1_loss(
+                image, gt_image) + self.opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+
+            depth_loss = l1_loss(depth[:, mask], gt_depth[mask])
+            reg_loss = isotropic_loss(submap.get_scaling())
+            total_loss = color_loss + depth_loss + reg_loss
+            total_loss.backward()
+
+            losses_dict[frame_id] = {"color_loss": color_loss.item(),
+                                     "depth_loss": depth_loss.item(),
+                                     "total_loss": total_loss.item()}
+
+            with torch.no_grad():
+
+                if iteration == iterations // 2 or iteration == iterations:
+                    prune_mask = (submap.get_opacity()
+                                  < self.pruning_thre).squeeze()
+                    submap.prune_points(prune_mask)
+
+                # Optimizer step
+                if iteration < iterations:
+                    submap.optimizer.step()
+                submap.optimizer.zero_grad(set_to_none=True)
+
+            iteration += 1
+        optimization_time = time.time() - start_time
+        losses_dict["optimization_time"] = optimization_time
+        losses_dict["optimization_iter_time"] = optimization_time / iterations
+        return losses_dict
