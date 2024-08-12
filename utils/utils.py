@@ -23,6 +23,16 @@ def np2torch(array: np.ndarray, device: str = "cpu") -> torch.Tensor:
     return torch.from_numpy(array).float().to(device)
 
 
+def torch2np(tensor: torch.Tensor) -> np.ndarray:
+    """ Converts a PyTorch tensor to a NumPy ndarray.
+    Args:
+        tensor: The PyTorch tensor to convert.
+    Returns:
+        A NumPy ndarray with the same data and dtype as the input tensor.
+    """
+    return tensor.detach().cpu().numpy()
+
+
 def get_render_settings(w, h, intrinsics, w2c: np.ndarray, near=0.01, far=100, sh_degree=0):
     """
     Constructs and returns a GaussianRasterizationSettings object for rendering,

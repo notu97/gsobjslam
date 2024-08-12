@@ -5,6 +5,7 @@ from typing import Union
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import ultralytics.engine.results
 import wandb
 
 
@@ -75,7 +76,8 @@ class Logger(object):
                        "Mapping/color_loss": opt_dict[frame_id]["color_loss"],
                        "Mapping/depth_loss": opt_dict[frame_id]["depth_loss"]})
 
-    def vis_mapping_iteration(self, frame_id, iter, color, depth, gt_color, gt_depth, seeding_mask=None) -> None:
+    def vis_mapping_iteration(self, frame_id, iter, color, depth, gt_color, gt_depth,
+                              yolo_result: ultralytics.engine.results.Results, seeding_mask=None) -> None:
         """
         Visualization of depth, color images and save to file.
 
@@ -122,7 +124,7 @@ class Logger(object):
         gt_color_np = np.clip(gt_color_np, 0, 1)
         color_np = np.clip(color_np, 0, 1)
         color_residual = np.clip(color_residual, 0, 1)
-        axs[1, 0].imshow(gt_color_np, cmap="plasma")
+        axs[1, 0].imshow(yolo_result.plot(), cmap="plasma")
         axs[1, 0].set_title('Input RGB', fontsize=16)
         axs[1, 0].set_xticks([])
         axs[1, 0].set_yticks([])

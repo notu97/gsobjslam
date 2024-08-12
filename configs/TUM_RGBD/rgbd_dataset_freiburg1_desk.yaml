@@ -11,7 +11,8 @@ scene_name: rgbd_dataset_freiburg1_desk
 uniform_seed_interval: 3
 map_iterations: 100
 new_submap_iterations: 100
-iou_thresh: 0.35
+iou_thresh: 0.05
+alpha_thre: 0.6
 # tracking
 gt_camera: True
 track_iterations: 200

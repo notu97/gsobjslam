@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 
 
 def create_point_cloud(image: np.ndarray, depth: np.ndarray, intrinsics: np.ndarray, pose: np.ndarray) -> np.ndarray:
@@ -33,3 +34,25 @@ def create_point_cloud(image: np.ndarray, depth: np.ndarray, intrinsics: np.ndar
     point_cloud = np.concatenate((posed_points, colors), axis=-1)
 
     return point_cloud
+
+
+def geometric_edge_mask(rgb_image: np.ndarray, dilate: bool = True, RGB: bool = False) -> np.ndarray:
+    """ Computes an edge mask for an RGB image using geometric edges.
+    Args:
+        rgb_image: The RGB image.
+        dilate: Whether to dilate the edges.
+        RGB: Indicates if the image format is RGB (True) or BGR (False).
+    Returns:
+        An edge mask of the input image.
+    """
+    # Convert the image to grayscale as Canny edge detection requires a single channel image
+    gray_image = cv2.cvtColor(
+        rgb_image, cv2.COLOR_BGR2GRAY if not RGB else cv2.COLOR_RGB2GRAY)
+    if gray_image.dtype != np.uint8:
+        gray_image = gray_image.astype(np.uint8)
+    edges = cv2.Canny(gray_image, threshold1=100, threshold2=200, apertureSize=3, L2gradient=True)
+    # Define the structuring element for dilation, you can change the size for a thicker/thinner mask
+    if dilate:
+        kernel = np.ones((2, 2), np.uint8)
+        edges = cv2.dilate(edges, kernel, iterations=1)
+    return edges

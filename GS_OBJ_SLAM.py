@@ -48,8 +48,8 @@ class GS_OBJ_SLAM(object):
         new_associations = self.associator.associate(new_detections, dangling_models, self.cur_gt_color,
                                                      self.cur_gt_depth, self.cur_est_c2w, self.dataset.intrinsics)
         self.associations.update(new_associations)
-        print("New associations found:")
-        print(new_associations)
+        # print("New associations found:")
+        # print(new_associations)
 
         return new_associations
 
@@ -102,4 +102,5 @@ class GS_OBJ_SLAM(object):
                     image_vis.clone().detach().permute(1, 2, 0),
                     depth_vis.clone().detach().permute(1, 2, 0),
                     keyframe["color"].permute(1, 2, 0),
-                    keyframe["depth"].unsqueeze(-1))
+                    keyframe["depth"].unsqueeze(-1),
+                    yolo_result)
