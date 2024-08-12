@@ -32,27 +32,29 @@ class Mapper:
                submap: GaussianModel, object_idx: int, is_new=False) -> GaussianModel:
 
         _, gt_color, gt_depth, _ = self.dataset[frame_id]
-        # w2c = np.linalg.inv(c2w)
-        # color_transform = torchvision.transforms.ToTensor()
-        # keyframe = {
-        #     "color": color_transform(gt_color).cuda(),
-        #     "depth": np2torch(gt_depth, device="cuda"),
-        #     "render_settings": get_render_settings(
-        #         self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
+        w2c = np.linalg.inv(c2w)
+        keyframe = {
+            "color": gt_color,
+            "depth": gt_depth,
+            "mask": torch.squeeze(yolo_result.masks[object_idx].data).cpu().numpy(),
+            "c2w": c2w,
+            "render_settings": get_render_settings(
+                self.dataset.width, self.dataset.height, self.dataset.intrinsics, w2c)}
 
-        pts = self.seed_new_points(frame_id, c2w, self.dataset.intrinsics, yolo_result, object_idx, is_new)
+        pts = self.seed_new_points(keyframe, self.dataset.intrinsics, is_new)
         new_pts_num = self.grow_submap(c2w, submap, pts)
         # @TODO: optimize submap
 
         return submap
 
-    def seed_new_points(self, frame_id: int, c2w: np.ndarray, intrinsics: np.ndarray,
-                        yolo_result: ultralytics.engine.results.Results, object_idx: int, is_new: bool) -> np.ndarray:
+    def seed_new_points(self, keyframe: dict, intrinsics: np.ndarray, is_new: bool) -> np.ndarray:
 
-        obj_mask = yolo_result.masks.data[object_idx, :, :].cpu().detach().numpy()
-        _, gt_color, gt_depth, _ = self.dataset[frame_id]
+        obj_mask = keyframe["mask"]
+        gt_color = keyframe["color"]
+        gt_depth = keyframe["depth"]
         gt_color = (gt_color.transpose((2, 0, 1)) * obj_mask).transpose((1, 2, 0))
         gt_depth = gt_depth * obj_mask  # non-object area have zero depth
+        c2w = keyframe["c2w"]
 
         pts = create_point_cloud(gt_color, 1.005 * gt_depth, intrinsics, c2w)
         flat_gt_depth = gt_depth.flatten()
