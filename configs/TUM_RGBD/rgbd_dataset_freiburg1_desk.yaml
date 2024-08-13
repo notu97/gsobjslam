@@ -1,7 +1,7 @@
 project_name: "Gaussian_SLAM_tumrgbd"
 dataset_name: "tum_rgbd"
 checkpoint_path: null
-frame_limit: 100 # use first n frames. for debugging, set to -1 to disable
+frame_limit: -1 # use first n frames. for debugging, set to -1 to disable
 seed: 0
 # data
 input_path: /home/nathan/datasets/tum/rgbd_dataset_freiburg1_desk/
