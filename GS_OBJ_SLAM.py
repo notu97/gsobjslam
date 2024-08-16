@@ -8,10 +8,37 @@ from associator import Associator
 from mapper import Mapper
 from logger import Logger
 
+# Quadricslam imports
+from typing import Callable, Dict, List, Optional, Union
+import gtsam
+import gtsam_quadrics
+from quadricslam_states import QuadricSlamState, StepState, SystemState
+from quadric_utils import (
+    QuadricInitialiser,
+    initialise_quadric_from_depth,
+    new_factors,
+    new_values,
+)
+import numpy as np
+from spatialmath import SE3
+
 
 class GS_OBJ_SLAM(object):
 
-    def __init__(self, configs_path: str) -> None:
+    def __init__(self, 
+                 configs_path: str,
+                 initial_pose: Optional[SE3] = None,
+                 noise_prior: np.ndarray = np.array([0] * 6, dtype=np.float64),
+                 noise_odom: np.ndarray = np.array([0.01] * 6, dtype=np.float64),
+                 noise_boxes: np.ndarray = np.array([3] * 4, dtype=np.float64),
+                 optimiser_batch: Optional[bool] = None,
+                 optimiser_params: Optional[Union[gtsam.ISAM2Params,
+                                                gtsam.LevenbergMarquardtParams,
+                                                gtsam.GaussNewtonParams]] = None,
+                 on_new_estimate: Optional[Callable[[QuadricSlamState], None]] = None,
+                 quadric_initialiser:
+                 QuadricInitialiser = initialise_quadric_from_depth
+        ) -> None:
 
         self.configs = load_config(configs_path)
         self.dataset = get_dataset(self.configs['dataset_name'])(self.configs)
@@ -26,6 +53,35 @@ class GS_OBJ_SLAM(object):
         self.cur_gt_color = None
         self.cur_gt_depth = None
         self.cur_est_c2w = None
+
+        self.on_new_estimate = on_new_estimate
+        self.quadric_initialiser = quadric_initialiser
+
+        # Bail if optimiser settings and modes aren't compatible
+        if (optimiser_batch == True and
+                type(optimiser_params) == gtsam.ISAM2Params):
+            raise ValueError("ERROR: Can't run batch mode with '%s' params." %
+                             type(optimiser_params))
+        elif (optimiser_batch == False and optimiser_params is not None and
+              type(optimiser_params) != gtsam.ISAM2Params):
+            raise ValueError(
+                "ERROR: Can't run incremental mode with '%s' params." %
+                type(optimiser_params))
+        if optimiser_params is None:
+            optimiser_params = (gtsam.LevenbergMarquardtParams()
+                                if optimiser_batch is True else
+                                gtsam.ISAM2Params())
+
+        # Setup the system state, and perform a reset
+        self.state = QuadricSlamState(
+            SystemState(
+                initial_pose=SE3() if initial_pose is None else initial_pose,
+                noise_prior=noise_prior,
+                noise_odom=noise_odom,
+                noise_boxes=noise_boxes,
+                optimiser_batch=type(optimiser_params) != gtsam.ISAM2Params,
+                optimiser_params=optimiser_params))
+        self.reset()
 
     def track_objects(self, rgb) -> ultralytics.engine.results.Results:
 
@@ -57,7 +113,20 @@ class GS_OBJ_SLAM(object):
 
         for frame_id in range(len(self.dataset)):
 
+            # QuadricSLAM state initialization
+            # Setup state for the current step
+            s = self.state.system
+            p = self.state.prev_step
+            n = StepState(
+                0 if self.state.prev_step is None else self.state.prev_step.i + 1)
+            self.state.this_step = n
+
             _, self.cur_gt_color, self.cur_gt_depth, gt_pose = self.dataset[frame_id]
+
+            n.odom = gt_pose
+            n.depth = self.cur_gt_depth
+            n.rgb = self.cur_gt_color
+
             if self.configs['gt_camera']:
                 self.cur_est_c2w = gt_pose
             else:
