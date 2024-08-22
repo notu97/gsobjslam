@@ -3,7 +3,7 @@ import gtsam
 import gtsam_quadrics
 import numpy as np
 
-from .quadricslam_states import QuadricSlamState
+from quadricslam_states import QuadricSlamState
 
 QuadricInitialiser = Callable[
     [List[gtsam.Pose3], List[gtsam_quadrics.AlignedBox2], QuadricSlamState],

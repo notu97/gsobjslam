@@ -12,7 +12,7 @@ from logger import Logger
 from typing import Callable, Dict, List, Optional, Union
 import gtsam
 import gtsam_quadrics
-from quadricslam_states import QuadricSlamState, StepState, SystemState
+from quadricslam_states import QuadricSlamState, StepState, SystemState, Detection, qi as QI
 from quadric_utils import (
     QuadricInitialiser,
     initialise_quadric_from_depth,
@@ -82,6 +82,24 @@ class GS_OBJ_SLAM(object):
                 optimiser_batch=type(optimiser_params) != gtsam.ISAM2Params,
                 optimiser_params=optimiser_params))
         self.reset()
+    
+    def reset(self) -> None:
+        # self.data_source.restart()
+
+        s = self.state.system
+        s.associated = []
+        s.unassociated = []
+        s.labels = {}
+        s.graph = gtsam.NonlinearFactorGraph()
+        s.estimates = gtsam.Values()
+        s.optimiser = (None if s.optimiser_batch else s.optimiser_type(
+            s.optimiser_params))
+
+        s.calib_depth = 1
+        s.calib_rgb = np.array([520.9, 521.0, 0, 325.1, 249.7]) # currently only for freiburg2
+
+        self.state.prev_step = None
+        self.state.this_step = None
 
     def track_objects(self, rgb) -> ultralytics.engine.results.Results:
 
@@ -93,8 +111,8 @@ class GS_OBJ_SLAM(object):
 
         ids = list(np.int32(yolo_result.boxes.id.numpy()))
         new_detections = yolo_result[[i for i, id in enumerate(ids) if id not in self.associations.keys()]]
-        old_ids = [id for id in ids if id in self.associations.keys()]
-        associated_models_idxs = [self.associations[id] for id in old_ids]
+        old_ids = [id for id in ids if id in self.associations.keys()] # Old submap Ids
+        associated_models_idxs = [self.associations[id] for id in old_ids] # 
         dangling_models = [(i, model) for i, model in enumerate(self.gaussian_models)
                            if i not in associated_models_idxs]
 
@@ -102,12 +120,16 @@ class GS_OBJ_SLAM(object):
             return {}
 
         new_associations = self.associator.associate(new_detections, dangling_models, self.cur_gt_color,
-                                                     self.cur_gt_depth, self.cur_est_c2w, self.dataset.intrinsics)
+                                                     self.cur_gt_depth, self.cur_est_c2w, self.dataset.intrinsics) # 3D iou Threshold check is done here
         self.associations.update(new_associations)
         # print("New associations found:")
         # print(new_associations)
 
         return new_associations
+    
+    def add_yolo_result_2_quadraicSLAM_state(self, yolo_result):
+        # TODO: Add detections to QuadricSLAM states
+        pass
 
     def run(self) -> None:
 
@@ -136,8 +158,12 @@ class GS_OBJ_SLAM(object):
             yolo_result = self.track_objects(self.cur_gt_color)
             if yolo_result.boxes.id is None:
                 continue
+
+            # Put Detections from Yolov8 into QuadricSLAM Detection class
+            self.add_yolo_result_2_quadraicSLAM_state(yolo_result) # n.detections
+
             # update associations
-            self.update_associations(yolo_result)
+            self.update_associations(yolo_result) ## Yolo_trk_id : Submap_id
 
             # iterate over objects
             for i in range(len(yolo_result)):
@@ -148,10 +174,38 @@ class GS_OBJ_SLAM(object):
                     self.mapper.update(frame_id, self.cur_est_c2w, yolo_result,
                                        self.gaussian_models[self.associations[tracking_id]], i)
                 else:
+                    '''
+                    New Submap Built here, Probably initilize the new quadric here.
+                    '''
                     print('New tracking id: %s' % tracking_id)
                     # start a new submap
-                    self.gaussian_models.append(self.mapper.new(frame_id, self.cur_est_c2w, yolo_result, i))
+                    new_gs_submap = self.mapper.new(frame_id, self.cur_est_c2w, yolo_result, i, len(self.gaussian_models))
+                    self.gaussian_models.append(new_gs_submap)
                     self.associations[tracking_id] = len(self.gaussian_models) - 1  # record association
+                    s.graph.add(
+                        gtsam_quadrics.BoundingBoxFactor(
+                            gtsam_quadrics.AlignedBox2(new_gs_submap.bounds),
+                            gtsam.Cal3_S2(s.calib_rgb), n.pose_key, new_gs_submap.quadric_key,
+                            s.noise_boxes))
+            
+            print(f"Association: trk_id:submap_id {self.associations}")
+
+            # # Add new pose to the factor graph
+            if p is None:
+                s.graph.add(
+                    gtsam.PriorFactorPose3(n.pose_key, s.initial_pose,
+                                        s.noise_prior))
+            else:
+                s.graph.add(
+                    gtsam.BetweenFactorPose3(
+                        p.pose_key, n.pose_key,
+                        gtsam.Pose3(((SE3() if p.odom is None else p.odom).inv() * (SE3() if n.odom is None else n.odom)).A),
+                        s.noise_odom))
+                
+
+
+
+
 
             # Visualise the mapping for the current frame
             w2c = np.linalg.inv(self.cur_est_c2w)

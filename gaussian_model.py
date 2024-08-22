@@ -54,6 +54,8 @@ class GaussianModel:
         self.spatial_lr_scale = 1
         self.setup_functions()
         self.isotropic = isotropic
+        self.quadric_key = None
+        self.bounds = None
 
     def restore_from_params(self, params_dict, training_args):
         self.training_setup(training_args)

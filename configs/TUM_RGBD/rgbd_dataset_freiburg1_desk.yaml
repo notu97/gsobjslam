@@ -4,7 +4,7 @@ checkpoint_path: null
 frame_limit: -1 # use first n frames. for debugging, set to -1 to disable
 seed: 0
 # data
-input_path: /home/nathan/datasets/tum/rgbd_dataset_freiburg1_desk/
+input_path: /home/shiladitya/Projects/MonoGS/datasets/tum/rgbd_dataset_freiburg1_desk/
 output_path: output/TUM_RGBD/rgbd_dataset_freiburg1_desk/
 scene_name: rgbd_dataset_freiburg1_desk
 # mapping

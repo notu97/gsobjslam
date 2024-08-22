@@ -10,6 +10,7 @@ from datasets import *
 from utils.utils import *
 from utils.mapper_utils import *
 from losses import *
+from quadricslam_states import Detection, QuadricSlamState, qi as QI
 
 
 class Mapper:
@@ -27,11 +28,12 @@ class Mapper:
         self.opt = OptimizationParams(ArgumentParser(description="Training script parameters"))
 
     def new(self, frame_id: int, c2w: np.ndarray, yolo_result: ultralytics.engine.results.Results,
-            object_idx: int) -> GaussianModel:
+            object_idx: int, submap_id: int) -> GaussianModel:
 
         gs = GaussianModel(0)
         gs.training_setup(self.opt)
         gs = self.update(frame_id, c2w, yolo_result, gs, object_idx, is_new=True)
+        gs.quadric_key = QI(submap_id)
 
         return gs
 
@@ -62,6 +64,9 @@ class Mapper:
         opt_dict = self.optimize_submap([(frame_id, keyframe)], submap, max_iterations)
         optimization_time = opt_dict['optimization_time']
         print("Optimization time: ", optimization_time)
+
+        # set the bounding box coords
+        submap.bounds = yolo_result.boxes[object_idx].xyxy.squeeze()
 
         return submap
 
