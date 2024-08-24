@@ -88,7 +88,7 @@ def new_factors(current: gtsam.NonlinearFactorGraph,
     fs = (set([current.at(i) for i in range(0, current.size())]) -
           set([previous.at(i) for i in range(0, previous.size())]))
 
-    print("fs: ",fs)
+    # print("fs: ",fs)
     # Return a NEW graph with the factors
     out = gtsam.NonlinearFactorGraph()
     for f in fs:

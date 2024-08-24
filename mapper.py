@@ -67,6 +67,7 @@ class Mapper:
 
         # set the bounding box coords
         submap.bounds = yolo_result.boxes[object_idx].xyxy.squeeze()
+        submap.label = yolo_result.names[int(yolo_result.boxes[object_idx].cls[0].item())]
 
         return submap
 

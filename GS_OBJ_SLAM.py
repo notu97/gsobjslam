@@ -1,6 +1,10 @@
 import ultralytics.engine.results
 from ultralytics import YOLO
 import torchvision
+from itertools import groupby
+from spatialmath import SE3, UnitQuaternion
+from spatialmath.base import trnorm
+
 
 from utils.utils import *
 from datasets import *
@@ -131,8 +135,59 @@ class GS_OBJ_SLAM(object):
         # TODO: Add detections to QuadricSLAM states
         pass
 
-    def run(self) -> None:
+    def guess_initial_values(self) -> None:
+        # Guessing approach (only guess values that don't already have an
+        # estimate):
+        # - guess poses using dead reckoning
+        # - guess quadrics using Euclidean mean of all observations
+        s = self.state.system
 
+        fs = [s.graph.at(i) for i in range(0, s.graph.nrFactors())]
+
+        # Start with prior factors
+        for pf in [
+                f for f in fs if type(f) == gtsam.PriorFactorPose3 and
+                not s.estimates.exists(f.keys()[0])
+        ]:
+            s.estimates.insert(pf.keys()[0], pf.prior())
+
+        # Add all between factors one-by-one (should never be any remaining,
+        # but if they are just dump them at the origin after the main loop)
+        bfs = [f for f in fs if type(f) == gtsam.BetweenFactorPose3]
+        done = False
+        while not done:
+            bf = next((f for f in bfs if s.estimates.exists(f.keys()[0]) and
+                       not s.estimates.exists(f.keys()[1])), None)
+            if bf is None:
+                done = True
+                continue
+            s.estimates.insert(
+                bf.keys()[1],
+                s.estimates.atPose3(bf.keys()[0]) * bf.measured())
+            bfs.remove(bf)
+        for bf in [
+                f for f in bfs if not all([
+                    s.estimates.exists(f.keys()[i])
+                    for i in range(0, len(f.keys()))
+                ])
+        ]:
+            s.estimates.insert(bf.keys()[1], gtsam.Pose3())
+
+        # Add all quadric factors
+        _ok = lambda x: x.objectKey()
+        bbs = sorted([
+            f for f in fs if type(f) == gtsam_quadrics.BoundingBoxFactor and
+            not s.estimates.exists(f.objectKey())
+        ],
+                     key=_ok)
+        for qbbs in [list(v) for k, v in groupby(bbs, _ok)]:
+            self.quadric_initialiser(
+                [s.estimates.atPose3(bb.poseKey()) for bb in qbbs],
+                [bb.measurement() for bb in qbbs],
+                self.state).addToValues(s.estimates, qbbs[0].objectKey())
+
+    def run(self) -> None:
+        base = np.array([0,0,0,1])
         for frame_id in range(len(self.dataset)):
 
             # QuadricSLAM state initialization
@@ -145,12 +200,19 @@ class GS_OBJ_SLAM(object):
 
             _, self.cur_gt_color, self.cur_gt_depth, gt_pose = self.dataset[frame_id]
 
+            # print("gt_pose: ",gt_pose)
+            # input("3. Press Enter to continue...")
+            # SE3(gt_pose)
+            # print("type gt_pose: ",type(gt_pose))
+
             n.odom = gt_pose
+            # print("Odom: ", n.odom)
+            # input("2. Press Enter to continue...")
             n.depth = self.cur_gt_depth
             n.rgb = self.cur_gt_color
 
             if self.configs['gt_camera']:
-                self.cur_est_c2w = gt_pose
+                self.cur_est_c2w = np.vstack((np.hstack((gt_pose.R,(gt_pose.t).reshape(3,1))),base))
             else:
                 raise NotImplementedError
 
@@ -188,7 +250,17 @@ class GS_OBJ_SLAM(object):
                             gtsam.Cal3_S2(s.calib_rgb), n.pose_key, new_gs_submap.quadric_key,
                             s.noise_boxes))
             
-            print(f"Association: trk_id:submap_id {self.associations}")
+            # print(f"Association: trk_id:submap_id {self.associations}")
+
+            s.labels = {
+                d.quadric_key: d.label
+                for d in self.gaussian_models
+                if d.quadric_key is not None
+            }
+
+            # print("Labels: ", s.labels)
+            # input("1. Press Enter to continue...")
+
 
             # # Add new pose to the factor graph
             if p is None:
@@ -201,11 +273,28 @@ class GS_OBJ_SLAM(object):
                         p.pose_key, n.pose_key,
                         gtsam.Pose3(((SE3() if p.odom is None else p.odom).inv() * (SE3() if n.odom is None else n.odom)).A),
                         s.noise_odom))
-                
+            
+            # Optimise if we're in iterative mode
+            if not s.optimiser_batch:
+                self.guess_initial_values()
+                if s.optimiser is None:
+                    s.optimiser = s.optimiser_type(s.optimiser_params)
+                # print("HERE")
+                try:
+                    # pu.db
+                    s.optimiser.update(
+                        new_factors(s.graph, s.optimiser.getFactorsUnsafe()),
+                        new_values(s.estimates,
+                                s.optimiser.getLinearizationPoint()))
+                    s.estimates = s.optimiser.calculateEstimate()
+                except RuntimeError as e:
+                    # For handling gtsam::InderminantLinearSystemException:
+                    #   https://gtsam.org/doxygen/a03816.html
+                    pass
+                if self.on_new_estimate:
+                    self.on_new_estimate(self.state)
 
-
-
-
+            self.state.prev_step = n
 
             # Visualise the mapping for the current frame
             w2c = np.linalg.inv(self.cur_est_c2w)
@@ -227,3 +316,13 @@ class GS_OBJ_SLAM(object):
                     keyframe["color"].permute(1, 2, 0),
                     keyframe["depth"].unsqueeze(-1),
                     yolo_result)
+            
+        if self.state.system.optimiser_batch:
+            self.guess_initial_values()
+            s = self.state.system
+            # s.graph.saveGraph("/home/shiladitya/Projects/gtsam_exps/graph_new.dot")
+            s.optimiser = s.optimiser_type(s.graph, s.estimates,
+                                           s.optimiser_params)
+            s.estimates = s.optimiser.optimize()
+            if self.on_new_estimate:
+                self.on_new_estimate(self.state)

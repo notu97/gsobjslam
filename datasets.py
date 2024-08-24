@@ -1,6 +1,7 @@
 import math
 import os
 from pathlib import Path
+from spatialmath import SE3, UnitQuaternion
 
 import cv2
 import numpy as np
@@ -67,6 +68,9 @@ class TUM_RGBD(BaseDataset):
                     associations.append((i, j, k))
         return associations
 
+    def _gt_to_SE3(self, f: np.ndarray) -> SE3:
+        return SE3.Rt(UnitQuaternion(f[6], f[3:6]).SO3(), f[0:3])
+
     def loadtum(self, datapath, frame_rate=-1):
         """ read video data in tum-rgbd format """
         if os.path.isfile(os.path.join(datapath, 'groundtruth.txt')):
@@ -99,17 +103,28 @@ class TUM_RGBD(BaseDataset):
 
         images, poses, depths = [], [], []
         inv_pose = None
+        prev_pose = None
         for ix in indicies:
             (i, j, k) = associations[ix]
             images += [os.path.join(datapath, image_data[i, 1])]
             depths += [os.path.join(datapath, depth_data[j, 1])]
             c2w = self.pose_matrix_from_quaternion(pose_vecs[k])
-            if inv_pose is None:
-                inv_pose = np.linalg.inv(c2w)
-                c2w = np.eye(4)
+
+            if prev_pose is None:
+                p=SE3()
+                prev_pose = pose_vecs[k]
             else:
-                c2w = inv_pose@c2w
-            poses += [c2w.astype(np.float32)]
+                p = self._gt_to_SE3(pose_vecs[k]) * self._gt_to_SE3(prev_pose).inv()
+
+            poses +=[p]
+
+
+            # if inv_pose is None:
+            #     inv_pose = np.linalg.inv(c2w)
+            #     c2w = np.eye(4)
+            # else:
+            #     c2w = np.matmul(inv_pose,c2w)
+            # poses += [c2w.astype(np.float32)]
 
         return images, depths, poses
 

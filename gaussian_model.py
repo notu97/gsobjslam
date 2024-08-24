@@ -56,6 +56,7 @@ class GaussianModel:
         self.isotropic = isotropic
         self.quadric_key = None
         self.bounds = None
+        self.label = None
 
     def restore_from_params(self, params_dict, training_args):
         self.training_setup(training_args)
