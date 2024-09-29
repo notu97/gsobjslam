@@ -25,7 +25,7 @@ from quadric_utils import (
 )
 import numpy as np
 from spatialmath import SE3
-
+import pickle
 
 class GS_OBJ_SLAM(object):
 
@@ -46,7 +46,7 @@ class GS_OBJ_SLAM(object):
 
         self.configs = load_config(configs_path)
         self.dataset = get_dataset(self.configs['dataset_name'])(self.configs)
-        self.yolo = YOLO("yolo_models/yolov8n-seg.pt")  # load an official model
+        self.yolo = YOLO("yolo_models/yolov8x-seg.pt")  # load an official model
         self.associator = Associator(self.configs)
         self.mapper = Mapper(self.configs, self.dataset)
         self.logger = Logger(self.configs['output_path'])
@@ -119,6 +119,12 @@ class GS_OBJ_SLAM(object):
         associated_models_idxs = [self.associations[id] for id in old_ids] # 
         dangling_models = [(i, model) for i, model in enumerate(self.gaussian_models)
                            if i not in associated_models_idxs]
+        
+        print("Yolov ids: ", ids)
+        print("new_detections: ", new_detections)
+        print("old_ids: ",old_ids)
+        print("associated_models_idxs: ",associated_models_idxs)
+        print("dangling_models: ", dangling_models)
 
         if (len(dangling_models) == 0) or (len(new_detections) == 0):
             return {}
@@ -188,6 +194,7 @@ class GS_OBJ_SLAM(object):
 
     def run(self) -> None:
         base = np.array([0,0,0,1])
+        gs_mean_history = []
         for frame_id in range(len(self.dataset)):
 
             # QuadricSLAM state initialization
@@ -280,6 +287,8 @@ class GS_OBJ_SLAM(object):
                 if s.optimiser is None:
                     s.optimiser = s.optimiser_type(s.optimiser_params)
                 # print("HERE")
+                s.graph.saveGraph("/home/shiladitya/Projects/gsobjslam/graph_new.dot")
+                input("press a key: 1")
                 try:
                     # pu.db
                     s.optimiser.update(
@@ -291,10 +300,18 @@ class GS_OBJ_SLAM(object):
                     # For handling gtsam::InderminantLinearSystemException:
                     #   https://gtsam.org/doxygen/a03816.html
                     pass
+                s.graph.saveGraph("/home/shiladitya/Projects/gsobjslam/graph_adding_factors.dot")
+                input("press a key: 2")
                 if self.on_new_estimate:
                     self.on_new_estimate(self.state)
 
             self.state.prev_step = n
+
+            temp = []
+            for gs in self.gaussian_models:
+                # print( gs.get_xyz().mean(dim=0))
+                temp.append(gs.get_xyz().mean(dim=0))
+            gs_mean_history.append(temp)
 
             # Visualise the mapping for the current frame
             w2c = np.linalg.inv(self.cur_est_c2w)
@@ -316,7 +333,8 @@ class GS_OBJ_SLAM(object):
                     keyframe["color"].permute(1, 2, 0),
                     keyframe["depth"].unsqueeze(-1),
                     yolo_result)
-            
+                
+                   
         if self.state.system.optimiser_batch:
             self.guess_initial_values()
             s = self.state.system
@@ -326,3 +344,6 @@ class GS_OBJ_SLAM(object):
             s.estimates = s.optimiser.optimize()
             if self.on_new_estimate:
                 self.on_new_estimate(self.state)
+                
+                input("press a key: 3")
+            

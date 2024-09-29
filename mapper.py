@@ -66,10 +66,78 @@ class Mapper:
         print("Optimization time: ", optimization_time)
 
         # set the bounding box coords
-        submap.bounds = yolo_result.boxes[object_idx].xyxy.squeeze()
+        bounds = self.compute_AABbox_for_GaussiaanModel(submap, keyframe)
+        print(" Bounds from Yolov8: (Measured Bbox)", yolo_result.boxes[object_idx].xyxy.squeeze()) # x_min,y_min,x_max,y_max
+        print(" Bounds from Gaussian Splatting: (Predicted Bbox)", bounds)
+        submap.bounds = bounds # get Axis Aligned Bbox from 3DGS
         submap.label = yolo_result.names[int(yolo_result.boxes[object_idx].cls[0].item())]
+        print("Label: ", submap.label)
+        input("press a key: 11")
 
         return submap
+    
+    def compute_AABbox_for_GaussiaanModel(self, gaussian_model: GaussianModel, keyframe: dict):
+
+        submap_projections = image_projected_submap(gaussian_model, keyframe)
+        input("press a key: 8")
+
+
+        means = submap_projections['means2D_list']
+        covariances = submap_projections['covs_list']
+
+        # Collect boundary points from all Gaussians
+        boundary_points = []
+        for mean, cov in zip(means, covariances):
+            ellipse_points = gaussian_ellipse(mean, cov)
+            boundary_points.append(ellipse_points)
+
+        # Flatten boundary points into a single array
+        boundary_points = np.vstack(boundary_points)
+
+        # Compute convex hull
+        hull = ConvexHull(boundary_points)
+
+        # Get the points of the convex hull
+        hull_points = boundary_points[hull.vertices]
+
+        # Find axis-aligned bounding box (AABB)
+        min_x, min_y = np.min(hull_points, axis=0)
+        max_x, max_y = np.max(hull_points, axis=0)
+
+                # # Plot the Gaussians, convex hull, and bounding box
+                # plt.figure(figsize=(6, 6))
+
+                # # Plot each Gaussian
+                # for mean, cov in zip(means, covariances):
+                #     ellipse_points = gaussian_ellipse(mean, cov)
+                #     plt.plot(ellipse_points[:, 0], ellipse_points[:, 1], 'b--')
+
+                # # Plot the convex hull
+                # for simplex in hull.simplices:
+                #     plt.plot(boundary_points[simplex, 0], boundary_points[simplex, 1], 'r-')
+
+                # # Plot the axis-aligned bounding box
+                # plt.plot([min_x, max_x, max_x, min_x, min_x], [min_y, min_y, max_y, max_y, min_y], 'g-', label='AABB')
+
+                # plt.xlabel('X')
+                # plt.ylabel('Y')
+                # plt.legend(['Gaussian boundary', 'Convex Hull', 'AABB'])
+                # plt.grid(True)
+                # plt.show()
+
+        # print(f"Axis-aligned bounding box: x_min={min_x}, x_max={max_x}, y_min={min_y}, y_max={max_y}")
+        input("press a key: 9")
+
+        pixel_min_x, pixel_min_y = map_coordinates_to_pixels(min_x,min_y)
+        pixel_max_x, pixel_max_y = map_coordinates_to_pixels(max_x,max_y)
+        input("press a key: 10")
+
+        
+        return torch.tensor([pixel_min_x,pixel_min_y,pixel_max_x,pixel_max_y])
+
+
+        
+
 
     def compute_seeding_mask(self, gaussian_model: GaussianModel, keyframe: dict, is_new: bool) -> np.ndarray:
 

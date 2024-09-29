@@ -20,6 +20,9 @@ def bboxes_from_tracker(yolo_result: ultralytics.engine.results.Results, gt_colo
         flat_gt_depth = gt_depth.flatten()
         non_zero_depth_mask = flat_gt_depth > 0.  # need filter if zero depth pixels in gt_depth
         pts = pts[non_zero_depth_mask][:, :3]
+        
+        if not np.any(pts):
+            continue
 
         # bbox: shape ( , 6), representing (xmin, ymin, zmin, xmax, ymax, zmax)
         bbox = np.hstack((np.min(pts, axis=0), np.max(pts, axis=0)))

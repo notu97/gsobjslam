@@ -73,6 +73,11 @@ class GaussianModel:
         actual_covariance = L @ L.transpose(1, 2)
         symm = strip_symmetric(actual_covariance)
         return symm
+    
+    def build_actual_covariance_from_scaling_rotation(self, scaling, scaling_modifier, rotation):
+        L = build_scaling_rotation(scaling_modifier * scaling, rotation)
+        actual_covariance = L @ L.transpose(1, 2)
+        return actual_covariance
 
     def setup_functions(self):
         self.scaling_activation = torch.exp
@@ -126,6 +131,9 @@ class GaussianModel:
 
     def get_covariance(self, scaling_modifier=1):
         return self.build_covariance_from_scaling_rotation(self.get_scaling(), scaling_modifier, self._rotation)
+    
+    def get_actual_covariance(self, scaling_modifier=1):
+        return self.build_actual_covariance_from_scaling_rotation(self.get_scaling(), scaling_modifier, self._rotation)
 
     def add_points(self, pcd: o3d.geometry.PointCloud, global_scale_init=True):
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
